@@ -1,3 +1,4 @@
+import com.j256.simplemagic.ContentInfoUtil
 import kotlinx.cli.*
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document.Document
@@ -22,22 +23,58 @@ import kotlin.io.path.*
 import kotlin.system.exitProcess
 
 enum class FileChangeMode {
-    new, change, delete
+    NEW, CHANGE, DELETE
 }
 
 @OptIn(ExperimentalCli::class)
-class DetectLarge : Subcommand("DetectLarge", "检测大尺寸的drawable") {
+class DetectLarge(private val indexPathObj: Path, private val project: File, private val module: File) :
+    Subcommand("DetectLarge", "检测大尺寸的drawable") {
     override fun execute() {
+        refreshIndexIfNeed(indexPathObj, project, module)
+        val contentInfoUtil = ContentInfoUtil()
+        val file = File(module, "src/main/res/")
+        val drawables = file.list { dir, name ->
+            name.startsWith("drawable")
+        }.orEmpty()
+        drawables.flatMap { subDrawable ->
+            val subDrawables = File(file, subDrawable)
+            subDrawables.listFiles().orEmpty().filter {
+                it.extension == "png"
+            }.map {
+                val size = contentInfoUtil.findMatch(it).message.split(",")[1].split("x").map { dimension ->
+                    dimension.trim().toInt()
+                }.fold(1) { a, i ->
+                    a * i
+                }
+                it to size
+            }
+        }.groupBy {
+            it.first.name
+        }.filter {
+            it.value.any { (_, size) ->
+                size > 4 * 1024 * 1024
+            }
+        }.forEach { (t, u) ->
+            println(t)
+            u.sortedBy {
+                it.second
+            }.forEach {
+                println("\t${it.second} bytes")
+            }
+        }
     }
 
 }
 
 @ExperimentalCli
-class RemoveUnused(private val module: File, private val indexPathObj: Path) :
+class RemoveUnused(private val indexPathObj: Path, private val project: File, private val module: File) :
     Subcommand("RemoveUnused", "移除未使用的图片") {
 
     private val isDryRun by option(ArgType.Boolean, "dryRun", "d").required()
+
     override fun execute() {
+        refreshIndexIfNeed(indexPathObj, project, module)
+
         val reportRoot = File(module, "build/reports/")
         val reportXmlPath = reportRoot.list { _, name ->
             name.endsWith("xml")
@@ -55,6 +92,20 @@ class RemoveUnused(private val module: File, private val indexPathObj: Path) :
 
 }
 
+@OptIn(ExperimentalCli::class)
+class CleanIndex(private val indexPathObj: Path, private val project: File, private val module: File) :
+    Subcommand("CleanIndex", "清除现有索引，然后退出") {
+    private val rebuild by option(ArgType.Boolean, "rebuild", "r", "删除索引后重新创建索引")
+
+    @OptIn(ExperimentalPathApi::class)
+    override fun execute() {
+        indexPathObj.deleteRecursively()
+        if (rebuild == true)
+            refreshIndexIfNeed(indexPathObj, project, module)
+    }
+
+}
+
 
 @OptIn(ExperimentalCli::class)
 fun main(args: Array<String>) {
@@ -66,25 +117,25 @@ fun main(args: Array<String>) {
     val project = File(projectDir)
 
     val indexPathObj = Paths.get(projectDir, ".index")
-    refreshIndex(indexPathObj, project, module)
 
     val argParser = ArgParser("Qing")
-    val detectLarge = DetectLarge()
-    val removeUnused = RemoveUnused(module, indexPathObj)
-    argParser.subcommands(detectLarge, removeUnused)
+    val detectLarge = DetectLarge(indexPathObj, project, module)
+    val removeUnused = RemoveUnused(indexPathObj, project, module)
+    val cleanIndex = CleanIndex(indexPathObj, project, module)
+    argParser.subcommands(detectLarge, removeUnused, cleanIndex)
     argParser.parse(args.sliceArray(1..<args.size))
 }
 
-private fun refreshIndex(indexPathObj: Path, project: File, module: File) {
+private fun refreshIndexIfNeed(indexPathObj: Path, project: File, module: File) {
     val shaFlag = Paths.get(indexPathObj.absolutePathString(), "qing")
     if (ensure(shaFlag)) exitProcess(1)
     val oldSha = shaFlag.readText()
     val currentSha = getCurrentSha(project)
     if (oldSha == currentSha) {
-        println("not change")
+        println("index not change!")
         return
     }
-    println("old $oldSha new $currentSha")
+    println("refresh index -> old $oldSha new $currentSha")
 
     val srcFolders = refreshFolders(oldSha, currentSha, project, module)
     refreshIndex(indexPathObj, srcFolders)
@@ -142,11 +193,10 @@ private fun ensure(shaFlag: Path): Boolean {
 }
 
 private fun getCurrentSha(project: File): String {
-    val start = ProcessBuilder("git", "rev-parse", "HEAD").directory(project).start()
-    val waitFor = start.waitFor()
-    if (waitFor != 0) exitProcess(waitFor)
-    val currentSha = start.inputStream.bufferedReader().readText().trim()
-    return currentSha
+    val process = ProcessBuilder("git", "rev-parse", "HEAD").directory(project).start()
+    val result = process.waitFor()
+    if (result != 0) exitProcess(result)
+    return process.inputStream.bufferedReader().readText().trim()
 }
 
 private fun refreshFolders(
@@ -160,11 +210,11 @@ private fun refreshFolders(
             it.endsWith(".kt") || it.endsWith(".xml")
         }
         strings(oldSha, currentSha, project, "M").filter(predicate).map {
-            File(project, it).absolutePath to FileChangeMode.change
+            File(project, it).absolutePath to FileChangeMode.CHANGE
         } + strings(oldSha, currentSha, project, "A").filter(predicate).map {
-            File(project, it).absolutePath to FileChangeMode.new
+            File(project, it).absolutePath to FileChangeMode.NEW
         } + strings(oldSha, currentSha, project, "D").filter(predicate).map {
-            File(project, it).absolutePath to FileChangeMode.delete
+            File(project, it).absolutePath to FileChangeMode.DELETE
         }
     } else {
         val codeFolder = File(module, "src/main/java")
@@ -179,7 +229,7 @@ private fun refreshFolders(
             File(pathname).list()?.forEach {
                 val file = File(pathname, it)
                 if (file.isFile) {
-                    srcFolders.add(file.absolutePath to FileChangeMode.new)
+                    srcFolders.add(file.absolutePath to FileChangeMode.NEW)
                 } else {
                     stack.add(file.absolutePath)
                 }
@@ -217,8 +267,8 @@ private fun refreshIndex(indexPathObj: Path?, srcFolders: List<Pair<String, File
                 srcFolders.forEach { (it, mode) ->
                     val file = File(it)
                     when (mode) {
-                        FileChangeMode.delete -> writer.deleteDocuments(Term("path", it))
-                        FileChangeMode.new -> writer.addDocument(Document().apply {
+                        FileChangeMode.DELETE -> writer.deleteDocuments(Term("path", it))
+                        FileChangeMode.NEW -> writer.addDocument(Document().apply {
                             add(StringField("path", it, Field.Store.YES))
                             add(TextField("content", file.readText(), Field.Store.NO))
                         })
