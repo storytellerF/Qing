@@ -16,6 +16,8 @@ dependencies {
     implementation ("org.apache.lucene:lucene-core:8.2.0")
     implementation ("org.apache.lucene:lucene-analyzers-common:8.2.0")
     implementation ("org.apache.lucene:lucene-queryparser:8.2.0")
+    implementation("com.j256.simplemagic:simplemagic:1.17")
+    implementation("org.jetbrains.kotlinx:kotlinx-cli-jvm:0.3.6")
 }
 
 tasks.test {

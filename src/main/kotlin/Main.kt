@@ -1,3 +1,4 @@
+import kotlinx.cli.*
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field
@@ -14,42 +15,71 @@ import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
 import java.io.File
 import java.nio.file.Path
-import java.util.LinkedList
+import java.nio.file.Paths
+import java.util.*
 import javax.xml.parsers.SAXParserFactory
+import kotlin.io.path.*
 import kotlin.system.exitProcess
 
 enum class FileChangeMode {
     new, change, delete
 }
 
-fun main(args: Array<String>) {
-    println("Program arguments: ${args.joinToString()}")
-    val moduleName = "app"
-    val projectDir = if (args.size == 1) {
-        args.first()
-    } else throw Exception()
-    val module = File(projectDir, moduleName)
-    val indexPath = File(System.getProperty("user.home"), ".index/mercury")
-    val shaFlag = File(indexPath, "qing")
-    if (!shaFlag.exists()) {
-        val parentFile = shaFlag.parentFile
-        if (!parentFile.exists()) {
-            if (!parentFile.mkdirs()) {
-                return
+@OptIn(ExperimentalCli::class)
+class DetectLarge : Subcommand("DetectLarge", "检测大尺寸的drawable") {
+    override fun execute() {
+    }
+
+}
+
+@ExperimentalCli
+class RemoveUnused(private val module: File, private val indexPathObj: Path) :
+    Subcommand("RemoveUnused", "移除未使用的图片") {
+
+    private val isDryRun by option(ArgType.Boolean, "dryRun", "d").required()
+    override fun execute() {
+        val reportRoot = File(module, "build/reports/")
+        val reportXmlPath = reportRoot.list { _, name ->
+            name.endsWith("xml")
+        }?.firstOrNull()
+        if (reportXmlPath != null) {
+            val list = unusedDrawableFlow(reportRoot, reportXmlPath).groupBy {
+                File(it).name.split(".").first()
             }
-        }
-        if (!shaFlag.createNewFile()) {
-            return
+            val (count, space) = deleteUnused(indexPathObj, list, isDryRun)
+            println("total ${list.size} delete $count space $space bytes")
+        } else {
+            println("找不到对应的xml 文件")
         }
     }
-    val oldSha = shaFlag.readText()
 
+}
+
+
+@OptIn(ExperimentalCli::class)
+fun main(args: Array<String>) {
+    println("Program arguments: ${args.joinToString()}")
+    if (args.isEmpty()) return
+    val moduleName = "app"
+    val projectDir = args.first()
+    val module = File(projectDir, moduleName)
     val project = File(projectDir)
-    val start = ProcessBuilder("git", "rev-parse", "HEAD").directory(project).start()
-    val waitFor = start.waitFor()
-    if (waitFor != 0) exitProcess(waitFor)
-    val currentSha = start.inputStream.bufferedReader().readText().trim()
 
+    val indexPathObj = Paths.get(projectDir, ".index")
+    refreshIndex(indexPathObj, project, module)
+
+    val argParser = ArgParser("Qing")
+    val detectLarge = DetectLarge()
+    val removeUnused = RemoveUnused(module, indexPathObj)
+    argParser.subcommands(detectLarge, removeUnused)
+    argParser.parse(args.sliceArray(1..<args.size))
+}
+
+private fun refreshIndex(indexPathObj: Path, project: File, module: File) {
+    val shaFlag = Paths.get(indexPathObj.absolutePathString(), "qing")
+    if (ensure(shaFlag)) exitProcess(1)
+    val oldSha = shaFlag.readText()
+    val currentSha = getCurrentSha(project)
     if (oldSha == currentSha) {
         println("not change")
         return
@@ -57,20 +87,15 @@ fun main(args: Array<String>) {
     println("old $oldSha new $currentSha")
 
     val srcFolders = refreshFolders(oldSha, currentSha, project, module)
-
-    println(srcFolders)
-    val indexPathObj = indexPath.toPath()
     refreshIndex(indexPathObj, srcFolders)
     shaFlag.writeText(currentSha)
+}
 
-
-    val reportRoot = File(module, "build/reports/")
-    val reportXmlPath = reportRoot.list { _, name ->
-        name.endsWith("xml")
-    }?.firstOrNull() ?: return
-    val list = unusedDrawableFlow(reportRoot, reportXmlPath).groupBy {
-        File(it).name.split(".").first()
-    }
+private fun deleteUnused(
+    indexPathObj: Path?,
+    list: Map<String, List<String>>,
+    isDry: Boolean
+): Pair<Int, Long> {
     var count = 0
     var space = 0L
     FSDirectory.open(indexPathObj).use { fsDirectory ->
@@ -91,9 +116,10 @@ fun main(args: Array<String>) {
                         }.reduce { acc, file ->
                             acc + file
                         }
-                        fileList.forEach {
-                            it.deleteOnExit()
-                        }
+                        if (!isDry)
+                            fileList.forEach {
+                                it.deleteOnExit()
+                            }
                         count++
                     }
                 }
@@ -101,8 +127,26 @@ fun main(args: Array<String>) {
         }
 
     }
-    println("total ${list.size} delete $count space $space bytes")
+    return Pair(count, space)
+}
 
+/**
+ * @return 返回创建文件是否失败
+ */
+private fun ensure(shaFlag: Path): Boolean {
+    if (!shaFlag.exists()) {
+        shaFlag.createParentDirectories()
+        shaFlag.createFile()
+    }
+    return false
+}
+
+private fun getCurrentSha(project: File): String {
+    val start = ProcessBuilder("git", "rev-parse", "HEAD").directory(project).start()
+    val waitFor = start.waitFor()
+    if (waitFor != 0) exitProcess(waitFor)
+    val currentSha = start.inputStream.bufferedReader().readText().trim()
+    return currentSha
 }
 
 private fun refreshFolders(
@@ -154,7 +198,8 @@ private fun strings(
     mode: String
 ): List<String> {
     val process =
-        ProcessBuilder("git", "diff", oldSha, currentSha, "--name-only", "--diff-filter=$mode").directory(project).start()
+        ProcessBuilder("git", "diff", oldSha, currentSha, "--name-only", "--diff-filter=$mode").directory(project)
+            .start()
     val processResult = process.waitFor()
     if (processResult != 0) {
         exitProcess(processResult)
@@ -177,7 +222,11 @@ private fun refreshIndex(indexPathObj: Path?, srcFolders: List<Pair<String, File
                             add(StringField("path", it, Field.Store.YES))
                             add(TextField("content", file.readText(), Field.Store.NO))
                         })
-                        else -> writer.updateDocument(Term("path", it), listOf(TextField("content", file.readText(), Field.Store.NO)))
+
+                        else -> writer.updateDocument(
+                            Term("path", it),
+                            listOf(TextField("content", file.readText(), Field.Store.NO))
+                        )
                     }
                 }
             }
@@ -189,7 +238,6 @@ private fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): Mutable
     val newInstance = SAXParserFactory.newInstance()
     val newSAXParser = newInstance.newSAXParser()
     val reportXmlFile = File(reportRoot, reportXmlPath)
-
 
     val list = mutableListOf<String>()
     var printNextLocation = false
