@@ -31,26 +31,8 @@ class DetectLarge(private val indexPathObj: Path, private val project: File, pri
     Subcommand("DetectLarge", "检测大尺寸的drawable") {
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
-        val contentInfoUtil = ContentInfoUtil()
-        val file = File(module, "src/main/res/")
-        val drawables = file.list { dir, name ->
-            name.startsWith("drawable")
-        }.orEmpty()
-        drawables.flatMap { subDrawable ->
-            val subDrawables = File(file, subDrawable)
-            subDrawables.listFiles().orEmpty().filter {
-                it.extension == "png"
-            }.map {
-                val size = contentInfoUtil.findMatch(it).message.split(",")[1].split("x").map { dimension ->
-                    dimension.trim().toInt()
-                }.fold(1) { a, i ->
-                    a * i
-                }
-                it to size
-            }
-        }.groupBy {
-            it.first.name
-        }.filter {
+        val groupBy = drawables(module)
+        groupBy.filter {
             it.value.any { (_, size) ->
                 size > 4 * 1024 * 1024
             }
@@ -59,11 +41,43 @@ class DetectLarge(private val indexPathObj: Path, private val project: File, pri
             u.sortedBy {
                 it.second
             }.forEach {
-                println("\t${it.second} bytes")
+                println("\t${it.second.toFloat() / 1048576} bytes")
             }
         }
     }
 
+
+}
+
+private fun drawables(module: File): Map<String, List<Pair<File, Int>>> {
+    val contentInfoUtil = ContentInfoUtil()
+    val file = File(module, "src/main/res/")
+    val drawables = file.list { _, name ->
+        name.startsWith("drawable")
+    }.orEmpty()
+    return drawables.flatMap { subDrawable ->
+        val subDrawables = File(file, subDrawable)
+        subDrawables.listFiles().orEmpty().filter {
+            it.extension == "png"
+        }.map {
+            it to extractImageDimension(contentInfoUtil, it).multi()
+        }
+    }.groupBy {
+        it.first.drawableName()
+    }
+}
+
+private fun List<Int>.multi(): Int {
+    return fold(1) { a, i ->
+        a * i
+    }
+}
+
+private fun extractImageDimension(
+    contentInfoUtil: ContentInfoUtil,
+    it: File?
+) = contentInfoUtil.findMatch(it).message.split(",")[1].split("x").map { dimension ->
+    dimension.trim().toInt()
 }
 
 @ExperimentalCli
@@ -71,23 +85,32 @@ class RemoveUnused(private val indexPathObj: Path, private val project: File, pr
     Subcommand("RemoveUnused", "移除未使用的图片") {
 
     private val isDryRun by option(ArgType.Boolean, "dryRun", "d").required()
+    private val full by option(ArgType.Boolean, "full", "f")
 
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
-
-        val reportRoot = File(module, "build/reports/")
-        val reportXmlPath = reportRoot.list { _, name ->
-            name.endsWith("xml")
-        }?.firstOrNull()
-        if (reportXmlPath != null) {
-            val list = unusedDrawableFlow(reportRoot, reportXmlPath).groupBy {
-                File(it).name.split(".").first()
+        if (full == true) {
+            drawables(module).mapValues {
+                it.value.map { (file, _) ->
+                    file.absolutePath
+                }.toSet()
             }
-            val (count, space) = deleteUnused(indexPathObj, list, isDryRun)
-            println("total ${list.size} delete $count space $space bytes")
         } else {
-            println("找不到对应的xml 文件")
+            val reportRoot = File(module, "build/reports/")
+            val reportXmlPath = reportRoot.list { _, name ->
+                name.endsWith("xml")
+            }?.firstOrNull()
+            if (reportXmlPath != null) {
+                unusedDrawableFlow(reportRoot, reportXmlPath)
+            } else {
+                println("找不到对应的xml 文件")
+                null
+            }
+        }?.let {
+            val (count, space) = deleteUnused(indexPathObj, it, isDryRun)
+            println("total ${it.size} delete $count space ${space.toFloat() / 1048576} MB")
         }
+
     }
 
 }
@@ -144,7 +167,7 @@ private fun refreshIndexIfNeed(indexPathObj: Path, project: File, module: File) 
 
 private fun deleteUnused(
     indexPathObj: Path?,
-    list: Map<String, List<String>>,
+    list: Map<String, Set<String>>,
     isDry: Boolean
 ): Pair<Int, Long> {
     var count = 0
@@ -284,15 +307,14 @@ private fun refreshIndex(indexPathObj: Path?, srcFolders: List<Pair<String, File
     }
 }
 
-private fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): MutableList<String> {
+private fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): MutableMap<String, MutableSet<String>> {
     val newInstance = SAXParserFactory.newInstance()
     val newSAXParser = newInstance.newSAXParser()
     val reportXmlFile = File(reportRoot, reportXmlPath)
 
-    val list = mutableListOf<String>()
-    var printNextLocation = false
-
     val handler = object : DefaultHandler() {
+        val map = mutableMapOf<String, MutableSet<String>>()
+        var printNextLocation = false
         override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes?) {
             super.startElement(uri, localName, qName, attributes)
             if (qName == "issue") {
@@ -305,7 +327,8 @@ private fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): Mutable
                 if (printNextLocation) {
                     val message = attributes?.getValue("file")
                     if (message?.endsWith("png") == true) {
-                        list.add(message)
+                        val key = File(message).drawableName()
+                        map.getOrPut(key) { mutableSetOf() }.add(message)
                     }
                 }
 
@@ -313,5 +336,7 @@ private fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): Mutable
         }
     }
     newSAXParser.parse(reportXmlFile, handler)
-    return list
+    return handler.map
 }
+
+private fun File.drawableName() = name.split(".").first()
