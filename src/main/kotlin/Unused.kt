@@ -13,7 +13,8 @@ fun deleteUnused(
     indexPathObj: Path?,
     list: Map<String, Set<String>>,
     isDry: Boolean
-): Pair<Int, Long> {
+): Triple<Int, Int, Long> {
+    var separateCount = 0
     var count = 0
     var space = 0L
     FSDirectory.open(indexPathObj).use { fsDirectory ->
@@ -38,14 +39,15 @@ fun deleteUnused(
                             fileList.forEach {
                                 it.deleteOnExit()
                             }
-                        count++
+                        separateCount++
+                        count += fileList.size
                     }
                 }
             }
         }
 
     }
-    return Pair(count, space)
+    return Triple(separateCount, count, space)
 }
 
 

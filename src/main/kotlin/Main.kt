@@ -35,8 +35,8 @@ class DetectLarge(private val indexPathObj: Path, private val project: File, pri
 class RemoveUnused(private val indexPathObj: Path, private val project: File, private val module: File) :
     Subcommand("RemoveUnused", "移除未使用的图片") {
 
-    private val isDryRun by option(ArgType.Boolean, "dryRun", "d").required()
-    private val full by option(ArgType.Boolean, "full", "f")
+    private val isDryRun by option(ArgType.Boolean, "dryRun", "d")
+    private val full by option(ArgType.Boolean, "full", "f", "不会使用lint 的结果，遍历文件夹搜索所有的图片")
 
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
@@ -58,8 +58,8 @@ class RemoveUnused(private val indexPathObj: Path, private val project: File, pr
                 null
             }
         }?.let {
-            val (count, space) = deleteUnused(indexPathObj, it, isDryRun)
-            println("total ${it.size} delete $count space ${space.toFloat() / 1048576} MB")
+            val (count, c, space) = deleteUnused(indexPathObj, it, isDryRun == true)
+            println("total ${it.size} delete $count $c space ${space.toFloat() / 1048576} MB")
         }
 
     }

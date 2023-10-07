@@ -74,12 +74,10 @@ fun refreshFolders(
             File(project, it).absolutePath to FileChangeMode.DELETE
         }
     } else {
-        val codeFolder = File(module, "src/main/java")
-        val layoutFolder = File(module, "src/main/res/layout")
+        val codeFolder = File(module, "src/main")
 
         val stack = LinkedList<String>()
         stack.add(codeFolder.absolutePath)
-        stack.add(layoutFolder.absolutePath)
         val srcFolders = mutableListOf<Pair<String, FileChangeMode>>()
         while (stack.isNotEmpty()) {
             val pathname = stack.pollFirst()
