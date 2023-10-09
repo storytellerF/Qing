@@ -8,6 +8,7 @@ version = "1.0-SNAPSHOT"
 
 repositories {
     mavenCentral()
+    maven { setUrl("https://jitpack.io") }
 }
 
 dependencies {
@@ -18,6 +19,7 @@ dependencies {
     implementation ("org.apache.lucene:lucene-queryparser:8.2.0")
     implementation("com.j256.simplemagic:simplemagic:1.17")
     implementation("org.jetbrains.kotlinx:kotlinx-cli-jvm:0.3.6")
+    implementation("com.github.KenjiOhtsuka:kotlin-case-changer:0.1.1")
 }
 
 tasks.test {

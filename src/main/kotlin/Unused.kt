@@ -12,7 +12,8 @@ import javax.xml.parsers.SAXParserFactory
 fun deleteUnused(
     indexPathObj: Path?,
     list: Map<String, Set<String>>,
-    isDry: Boolean
+    isDry: Boolean,
+    buildTerm: (String) -> List<String>
 ): Triple<Int, Int, Long> {
     var separateCount = 0
     var count = 0
@@ -23,9 +24,16 @@ fun deleteUnused(
             DirectoryReader.open(fsDirectory).use { reader ->
                 val searcher = IndexSearcher(reader)
                 list.forEach { (name, group) ->
-                    if (listOf(name, "R.drawable.$name").all {
-                            val docs = searcher.search(parser.parse(it), 1)
-                            docs.scoreDocs.isEmpty()
+                    if (buildTerm(name).all {
+                            try {
+                                val docs = searcher.search(parser.parse(it), 1)
+                                docs.scoreDocs.isEmpty()
+                            } catch (e: Exception) {
+                                println("when $it")
+                                System.err.println(e)
+                                false
+                            }
+
                         }) {
                         val fileList = group.map {
                             File(it)
@@ -35,7 +43,11 @@ fun deleteUnused(
                         }.reduce { acc, file ->
                             acc + file
                         }
-                        if (!isDry)
+                        if (isDry)
+                            fileList.forEach {
+                                println(it.absolutePath)
+                            }
+                        else
                             fileList.forEach {
                                 it.deleteOnExit()
                             }
@@ -51,8 +63,7 @@ fun deleteUnused(
 }
 
 
-
-fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): MutableMap<String, MutableSet<String>> {
+fun unusedResourcesFlowFromLint(reportRoot: File, reportXmlPath: String): MutableMap<String, MutableSet<String>> {
     val newInstance = SAXParserFactory.newInstance()
     val newSAXParser = newInstance.newSAXParser()
     val reportXmlFile = File(reportRoot, reportXmlPath)
@@ -71,7 +82,7 @@ fun unusedDrawableFlow(reportRoot: File, reportXmlPath: String): MutableMap<Stri
             } else if (qName == "location") {
                 if (printNextLocation) {
                     val message = attributes?.getValue("file")
-                    if (message?.endsWith("png") == true) {
+                    if (message != null) {
                         val key = File(message).drawableName()
                         map.getOrPut(key) { mutableSetOf() }.add(message)
                     }

@@ -1,3 +1,4 @@
+import com.j256.simplemagic.ContentInfoUtil
 import kotlinx.cli.*
 import java.io.File
 import java.nio.file.Path
@@ -12,10 +13,17 @@ enum class FileChangeMode {
 @OptIn(ExperimentalCli::class)
 class DetectLarge(private val indexPathObj: Path, private val project: File, private val module: File) :
     Subcommand("DetectLarge", "检测大尺寸的drawable") {
+
+    private val contentInfoUtil = ContentInfoUtil()
+
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
-        val groupBy = drawables(module)
-        groupBy.filter {
+        val mapValues = DrawableDetector(module).detect().mapValues {
+            it.value.map { file ->
+                file to File(file).extractImageDimension(contentInfoUtil).multi()
+            }
+        }
+        mapValues.filter {
             it.value.any { (_, size) ->
                 size > 4 * 1024 * 1024
             }
@@ -33,33 +41,20 @@ class DetectLarge(private val indexPathObj: Path, private val project: File, pri
 
 @ExperimentalCli
 class RemoveUnused(private val indexPathObj: Path, private val project: File, private val module: File) :
-    Subcommand("RemoveUnused", "移除未使用的图片") {
+    Subcommand("RemoveUnused", "移除未使用的资源") {
 
     private val isDryRun by option(ArgType.Boolean, "dryRun", "d")
     private val full by option(ArgType.Boolean, "full", "f", "不会使用lint 的结果，遍历文件夹搜索所有的图片")
 
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
-        if (full == true) {
-            drawables(module).mapValues {
-                it.value.map { (file, _) ->
-                    file.absolutePath
-                }.toSet()
-            }
+        (if (full == true) {
+            listOf(DrawableDetector(module), RawDetector(module), LayoutDetector(module))
         } else {
-            val reportRoot = File(module, "build/reports/")
-            val reportXmlPath = reportRoot.list { _, name ->
-                name.endsWith("xml")
-            }?.firstOrNull()
-            if (reportXmlPath != null) {
-                unusedDrawableFlow(reportRoot, reportXmlPath)
-            } else {
-                println("找不到对应的xml 文件")
-                null
-            }
-        }?.let {
-            val (count, c, space) = deleteUnused(indexPathObj, it, isDryRun == true)
-            println("total ${it.size} delete $count $c space ${space.toFloat() / 1048576} MB")
+            listOf(ReportDetector(module))
+        }).forEach {
+            it.detect()
+            it.run(indexPathObj, isDryRun == true)
         }
 
     }
