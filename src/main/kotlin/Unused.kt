@@ -10,15 +10,15 @@ import java.nio.file.Path
 import javax.xml.parsers.SAXParserFactory
 
 fun deleteUnused(
-    indexPathObj: Path?,
-    list: Map<String, Set<String>>,
-    isDry: Boolean,
+    indexPath: Path?,
+    list: Resources,
+    isDryRun: Boolean,
     buildTerm: (String) -> List<String>
 ): Triple<Int, Int, Long> {
     var separateCount = 0
     var count = 0
     var space = 0L
-    FSDirectory.open(indexPathObj).use { fsDirectory ->
+    FSDirectory.open(indexPath).use { fsDirectory ->
         StandardAnalyzer().use { analyzer ->
             val parser = QueryParser("content", analyzer)
             DirectoryReader.open(fsDirectory).use { reader ->
@@ -43,7 +43,7 @@ fun deleteUnused(
                         }.reduce { acc, file ->
                             acc + file
                         }
-                        if (isDry)
+                        if (isDryRun)
                             fileList.forEach {
                                 println(it.absolutePath)
                             }
@@ -63,7 +63,7 @@ fun deleteUnused(
 }
 
 
-fun unusedResourcesFlowFromLint(reportRoot: File, reportXmlPath: String): MutableMap<String, MutableSet<String>> {
+fun unusedResourcesFlowFromLint(reportRoot: File, reportXmlPath: String): Resources {
     val newInstance = SAXParserFactory.newInstance()
     val newSAXParser = newInstance.newSAXParser()
     val reportXmlFile = File(reportRoot, reportXmlPath)

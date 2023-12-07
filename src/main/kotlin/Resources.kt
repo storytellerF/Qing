@@ -3,6 +3,12 @@ import com.j256.simplemagic.ContentInfoUtil
 import java.io.File
 import java.nio.file.Path
 
+typealias ResourceName = String
+
+typealias ResourceSet = Set<String>
+
+typealias Resources = Map<ResourceName, ResourceSet>
+
 fun File.drawableName() = name.split(".").first()
 
 fun File.extractImageDimension(
@@ -15,7 +21,7 @@ abstract class Detector(val module: File) {
 
     protected val data = mutableMapOf<String, Set<String>>()
     private var initialized = false
-    fun detect(): Map<String, Set<String>> {
+    fun detect(): Resources {
         if (initialized) return data
         data.putAll(detectInternal().filter {
             it.key.isNotEmpty()
@@ -24,7 +30,7 @@ abstract class Detector(val module: File) {
         return data
     }
 
-    protected abstract fun detectInternal(): Map<String, Set<String>>
+    protected abstract fun detectInternal(): Resources
 
     fun run(indexObj: Path, isDry: Boolean) {
         if (!initialized) detect()
@@ -89,7 +95,7 @@ class RawDetector(module: File) : Detector(module) {
 }
 
 class ReportDetector(module: File) : Detector(module) {
-    override fun detectInternal(): Map<String, Set<String>> {
+    override fun detectInternal(): Resources {
         val reportRoot = File(module, "build/reports/")
         val reportXmlPath = reportRoot.list { _, name ->
             name.endsWith("xml")
@@ -107,14 +113,21 @@ class ReportDetector(module: File) : Detector(module) {
 
 }
 
-fun resources(module: File, pathDetect: (String) -> Boolean, fileDetect: (File) -> Boolean): Map<String, Set<String>> {
-    val file = File(module, "src/main/res/")
-    val drawables = file.list { _, name ->
+/**
+ * 解析指定目录指定文件类型的所有文件。
+ * @return 返回的数据包含文件名和对应的文件
+ */
+fun resources(
+    module: File,
+    pathDetect: (String) -> Boolean,
+    fileDetect: (File) -> Boolean
+): Resources {
+    val resPath = File(module, "src/main/res/")
+    val paths = resPath.list { _, name ->
         pathDetect(name)
     }.orEmpty()
-    return drawables.flatMap { subDrawable ->
-        val subDrawables = File(file, subDrawable)
-        subDrawables.listFiles().orEmpty().filter {
+    return paths.flatMap { subPath ->
+        File(resPath, subPath).listFiles().orEmpty().filter {
             fileDetect(it)
         }.map {
             it

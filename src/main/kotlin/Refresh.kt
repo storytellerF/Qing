@@ -75,6 +75,12 @@ fun refreshFolders(
         }
     } else {
         val codeFolder = File(module, "src/main")
+        val exec = Runtime.getRuntime().exec("sh gradlew ${module.name}:tasks", arrayOf(), project)
+        val re = exec.waitFor()
+        val readText = exec.inputStream.bufferedReader().readText()
+        println(re)
+        println(readText)
+
 
         val stack = LinkedList<String>()
         stack.add(codeFolder.absolutePath)
