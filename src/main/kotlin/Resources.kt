@@ -47,8 +47,7 @@ class DrawableDetector(module: File) : Detector(module) {
     override fun runInternal(indexObj: Path, isDry: Boolean) {
         val (count, c, space) = deleteUnused(indexObj, data, isDry) {
             listOf(
-                it,
-                "R.drawable.$it"
+                it
             )
         }
         println("drawable total ${data.size} delete $count $c space ${space.toFloat() / 1048576} MB")
@@ -65,12 +64,7 @@ class LayoutDetector(module: File) : Detector(module) {
         val (count, c, space) = deleteUnused(indexObj, data, isDry) {
             val listOf = listOf(
                 it,
-                "R.layout.$it",
                 it.toCamelCase() + "Binding",
-                it.toCamelCase() + "Binding.bind",
-                it.toCamelCase() + "Binding.inflate",
-                it.toCamelCase() + "Binding\\:\\:bind",
-                it.toCamelCase() + "Binding\\:\\:inflate"
             )
             listOf
         }
@@ -87,7 +81,7 @@ class RawDetector(module: File) : Detector(module) {
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
         val (count, c, space) = deleteUnused(indexObj, data, isDry) {
-            listOf(it, "R.raw.$it")
+            listOf(it)
         }
         println("raw total ${data.size} delete $count $c space ${space.toFloat() / 1048576} MB")
     }

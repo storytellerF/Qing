@@ -41,19 +41,29 @@ fun refreshIndex(indexPathObj: Path?, srcFolders: List<Pair<String, FileChangeMo
                     when (mode) {
                         FileChangeMode.DELETE -> writer.deleteDocuments(Term("path", it))
                         FileChangeMode.NEW -> writer.addDocument(Document().apply {
+                            val indexed = file.readText().indexed()
                             add(StringField("path", it, Field.Store.YES))
-                            add(TextField("content", file.readText(), Field.Store.NO))
+                            add(TextField("content", indexed, Field.Store.NO))
                         })
 
-                        else -> writer.updateDocument(
-                            Term("path", it),
-                            listOf(TextField("content", file.readText(), Field.Store.NO))
-                        )
+                        else -> {
+                            val indexed = file.readText().indexed()
+                            writer.updateDocument(
+                                Term("path", it),
+                                listOf(TextField("content", indexed, Field.Store.NO))
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
+
+val regex = Regex("[!\"#\$%&'()*+,\\-./:;<=>?@\\[\\\\\\]^`{|}~\\p{S}\\s\\n\\r]+")
+
+private fun String.indexed(): String {
+    return split(regex).toSet().joinToString(" ")
 }
 
 fun refreshFolders(
@@ -74,25 +84,36 @@ fun refreshFolders(
             File(project, it).absolutePath to FileChangeMode.DELETE
         }
     } else {
-        val codeFolder = File(module, "src/main")
-        val exec = Runtime.getRuntime().exec("sh gradlew ${module.name}:tasks", arrayOf(), project)
+        val r = Regex("[ \\w\\W]+?: \\[([\\w\\W/ ,]+?)]")
+
+        val exec = Runtime.getRuntime().exec("sh gradlew ${module.name}:sourceSets", null, project)
         val re = exec.waitFor()
         val readText = exec.inputStream.bufferedReader().readText()
-        println(re)
-        println(readText)
-
+        val list = if (re == 0) {
+            readText.split("\n").mapNotNull {
+                r.find(it)?.groups?.get(1)?.value
+            }.flatMap {
+                it.split(", ")
+            }.toSet().map {
+                File(project, it).absolutePath
+            }
+        } else {
+            val codeFolder = File(module, "src/main")
+            listOf(codeFolder.absolutePath)
+        }
 
         val stack = LinkedList<String>()
-        stack.add(codeFolder.absolutePath)
+        stack.addAll(list)
         val srcFolders = mutableListOf<Pair<String, FileChangeMode>>()
         while (stack.isNotEmpty()) {
             val pathname = stack.pollFirst()
             File(pathname).list()?.forEach {
-                val file = File(pathname, it)
-                if (file.isFile) {
-                    srcFolders.add(file.absolutePath to FileChangeMode.NEW)
-                } else {
-                    stack.add(file.absolutePath)
+                val element = File(pathname, it).absolutePath
+                when {
+                    File(pathname, it).isDirectory -> stack.add(element)
+
+                    File(pathname, it).name.endsWith(".kt") || File(pathname, it).name.endsWith(".xml") ->
+                        srcFolders.add(element to FileChangeMode.NEW)
                 }
             }
 

@@ -1,7 +1,9 @@
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.index.DirectoryReader
+import org.apache.lucene.index.Term
 import org.apache.lucene.queryparser.classic.QueryParser
 import org.apache.lucene.search.IndexSearcher
+import org.apache.lucene.search.TermQuery
 import org.apache.lucene.store.FSDirectory
 import org.xml.sax.Attributes
 import org.xml.sax.helpers.DefaultHandler
@@ -27,6 +29,12 @@ fun deleteUnused(
                     if (buildTerm(name).all {
                             try {
                                 val docs = searcher.search(parser.parse(it), 1)
+                                docs.scoreDocs.forEach {
+                                    val get = reader.document(it.doc).get("path")
+                                    if (get == null) {
+                                        println("path is null $name")
+                                    }
+                                }
                                 docs.scoreDocs.isEmpty()
                             } catch (e: Exception) {
                                 println("when $it")
@@ -45,7 +53,7 @@ fun deleteUnused(
                         }
                         if (isDryRun)
                             fileList.forEach {
-                                println(it.absolutePath)
+                                println("delete ${it.absolutePath}")
                             }
                         else
                             fileList.forEach {
