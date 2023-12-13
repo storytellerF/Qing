@@ -1,6 +1,7 @@
 import org.apache.lucene.analysis.standard.StandardAnalyzer
 import org.apache.lucene.document.Document
 import org.apache.lucene.document.Field
+import org.apache.lucene.document.StoredField
 import org.apache.lucene.document.StringField
 import org.apache.lucene.document.TextField
 import org.apache.lucene.index.IndexWriter
@@ -8,7 +9,9 @@ import org.apache.lucene.index.IndexWriterConfig
 import org.apache.lucene.index.Term
 import org.apache.lucene.store.FSDirectory
 import java.io.File
+import java.math.BigInteger
 import java.nio.file.Path
+import java.security.MessageDigest
 import java.util.*
 import kotlin.system.exitProcess
 
@@ -32,25 +35,43 @@ private fun diffFiles(
     }
 }
 
+fun calculateMD5(input: String): String {
+    val md = MessageDigest.getInstance("MD5")
+    val messageDigest = md.digest(input.toByteArray())
+    val no = BigInteger(1, messageDigest)
+    var hashText = no.toString(16)
+    while (hashText.length < 32) {
+        hashText = "0$hashText"
+    }
+    return hashText
+}
+
 fun refreshIndex(indexPathObj: Path?, srcFolders: List<Pair<String, FileChangeMode>>) {
     FSDirectory.open(indexPathObj).use { directory ->
         StandardAnalyzer().use { analyzer ->
             IndexWriter(directory, IndexWriterConfig(analyzer)).use { writer ->
                 srcFolders.forEach { (it, mode) ->
                     val file = File(it)
+                    val path = file.absolutePath
+                    val id = calculateMD5(path)
                     when (mode) {
-                        FileChangeMode.DELETE -> writer.deleteDocuments(Term("path", it))
+                        FileChangeMode.DELETE -> writer.deleteDocuments(Term("id", id))
                         FileChangeMode.NEW -> writer.addDocument(Document().apply {
                             val indexed = file.readText().indexed()
-                            add(StringField("path", it, Field.Store.YES))
+                            add(StringField("id", calculateMD5(it), Field.Store.NO))
+                            add(StoredField("path", path))
                             add(TextField("content", indexed, Field.Store.NO))
                         })
 
                         else -> {
                             val indexed = file.readText().indexed()
                             writer.updateDocument(
-                                Term("path", it),
-                                listOf(TextField("content", indexed, Field.Store.NO))
+                                Term("id", id),
+                                listOf(
+                                    StringField("id", "id", Field.Store.NO),
+                                    TextField("content", indexed, Field.Store.NO),
+                                    StoredField("path", path)
+                                )
                             )
                         }
                     }
