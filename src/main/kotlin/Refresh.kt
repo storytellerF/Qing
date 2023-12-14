@@ -133,7 +133,9 @@ fun refreshFolders(
                 when {
                     File(pathname, it).isDirectory -> stack.add(element)
 
-                    File(pathname, it).name.endsWith(".kt") || File(pathname, it).name.endsWith(".xml") ->
+                    File(pathname, it).name.endsWith(".kt") || File(pathname, it).let {
+                        it.name.endsWith(".xml") && !it.absolutePath.contains("navigation")
+                    } ->
                         srcFolders.add(element to FileChangeMode.NEW)
                 }
             }

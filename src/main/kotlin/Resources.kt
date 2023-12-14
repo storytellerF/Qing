@@ -1,11 +1,16 @@
 import com.improve_future.case_changer.toCamelCase
 import com.j256.simplemagic.ContentInfoUtil
+import org.xml.sax.Attributes
+import org.xml.sax.helpers.DefaultHandler
 import java.io.File
 import java.nio.file.Path
+import javax.xml.parsers.SAXParserFactory
 
 typealias ResourceName = String
 
-typealias ResourceSet = Set<String>
+typealias ResourcePath = String
+
+typealias ResourceSet = Set<ResourcePath>
 
 typealias Resources = Map<ResourceName, ResourceSet>
 
@@ -131,6 +136,54 @@ fun resources(
     }.mapValues {
         it.value.map { file1 ->
             file1.absolutePath
+        }.toSet()
+    }
+}
+
+/**
+ * 解析指定目录指定文件类型的所有文件。
+ * @return 返回的数据包含文件名和对应的文件
+ */
+fun xmlResources(
+    module: File,
+    pathDetect: (String) -> Boolean,
+    fileDetect: (File) -> Boolean
+): Resources {
+    val newSAXParser = SAXParserFactory.newInstance().newSAXParser()
+    val resPath = File(module, "src/main/res/")
+    val paths = resPath.list { _, name ->
+        pathDetect(name)
+    }.orEmpty()
+    return paths.flatMap { subPath ->
+        File(resPath, subPath).listFiles().orEmpty<File>().filter {
+            fileDetect(it)
+        }.map {
+            it
+        }
+    }.flatMap { file ->
+        val list = mutableListOf<ResourceName>()
+        newSAXParser.parse(file, object : DefaultHandler() {
+            override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes?) {
+                if (qName == "fragment") {
+                    val id = attributes?.getValue("android:id")?.let {
+                        it.substring(it.lastIndexOf("/") + 1)
+                    }
+                    val name = attributes?.getValue("android:name")
+                    if (id != null || name != null) {
+                        list.add("$id-$name")
+                    }
+                }
+            }
+        })
+        val absolutePath: ResourcePath = file.absolutePath
+        list.map {
+            absolutePath to it
+        }
+    }.groupBy { (_, name) ->
+        name
+    }.mapValues {
+        it.value.map { (path) ->
+            path
         }.toSet()
     }
 }

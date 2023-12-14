@@ -14,9 +14,9 @@ repositories {
 dependencies {
     testImplementation(kotlin("test"))
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.7.3")
-    implementation ("org.apache.lucene:lucene-core:8.2.0")
-    implementation ("org.apache.lucene:lucene-analyzers-common:8.2.0")
-    implementation ("org.apache.lucene:lucene-queryparser:8.2.0")
+    implementation("org.apache.lucene:lucene-core:8.2.0")
+    implementation("org.apache.lucene:lucene-analyzers-common:8.2.0")
+    implementation("org.apache.lucene:lucene-queryparser:8.2.0")
     implementation("com.j256.simplemagic:simplemagic:1.17")
     implementation("org.jetbrains.kotlinx:kotlinx-cli-jvm:0.3.6")
     implementation("com.github.KenjiOhtsuka:kotlin-case-changer:0.1.1")
