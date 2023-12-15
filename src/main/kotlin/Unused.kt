@@ -8,20 +8,12 @@ import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
 import org.xml.sax.helpers.XMLFilterImpl
 import java.io.File
-import java.io.InputStream
-import java.io.OutputStream
-import java.io.StringReader
-import java.io.StringWriter
 import java.nio.file.Path
-import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
 import javax.xml.transform.OutputKeys
-import javax.xml.transform.Source
-import javax.xml.transform.Transformer
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.sax.SAXSource
 import javax.xml.transform.stream.StreamResult
-import javax.xml.transform.stream.StreamSource
 
 data class Count(val separate: Int, val total: Int, val space: Long)
 
@@ -85,7 +77,7 @@ fun deleteUnusedXmlField(
     list: Resources,
     isDryRun: Boolean,
     tagName: String,
-    visitor: (Attributes?, List<ResourceName>) -> Boolean,
+    visitor: (Attributes?, List<ResourceName>, IndexSearcher, QueryParser) -> Boolean,
     buildTerm: (String) -> List<String>
 ): Count {
     var separateCount = 0
@@ -99,17 +91,17 @@ fun deleteUnusedXmlField(
                 val unusedNavigation = list.filter { (name, group) ->
                     buildTerm(name).all {
                         try {
-                            val docs = searcher.search(parser.parse(it), 1)
-                            docs.scoreDocs.isEmpty()
+                            searcher.search(parser.parse(it), 1).scoreDocs.isEmpty()
                         } catch (e: Exception) {
-                            println("when $it")
-                            System.err.println(e)
+                            System.err.println(Exception("exception in search $it", e))
                             false
                         }
                     }
                 }
                 count += unusedNavigation.size
-                println(unusedNavigation)
+                if (isDryRun) {
+                    println(unusedNavigation)
+                }
                 /**
                  * 转换key-value 的位置
                  */
@@ -127,7 +119,7 @@ fun deleteUnusedXmlField(
                 separateCount += pathKeyed.size
                 val saxParserFactory = SAXParserFactory.newInstance()
                 space += pathKeyed.map { (path, u) ->
-                    filterUnusedField(saxParserFactory, tagName, visitor, u, path, isDryRun)
+                    filterUnusedField(saxParserFactory, tagName, visitor, u, path, isDryRun, searcher, parser)
                 }.sum()
             }
         }
@@ -139,10 +131,12 @@ fun deleteUnusedXmlField(
 private fun filterUnusedField(
     saxParserFactory: SAXParserFactory,
     tagName: String,
-    visitor: (Attributes?, List<ResourceName>) -> Boolean,
+    visitor: (Attributes?, List<ResourceName>, IndexSearcher, QueryParser) -> Boolean,
     u: List<ResourceName>,
     path: ResourcePath,
-    isDryRun: Boolean
+    isDryRun: Boolean,
+    indexSearcher: IndexSearcher,
+    queryParser: QueryParser,
 ): Long {
     val xmlFilterImpl =
         object : XMLFilterImpl(saxParserFactory.newSAXParser().xmlReader) {
@@ -155,7 +149,7 @@ private fun filterUnusedField(
                 atts: Attributes
             ) {
                 if (qName == tagName) {
-                    val visitor1 = visitor(atts, u)
+                    val visitor1 = visitor(atts, u, indexSearcher, queryParser)
                     if (!visitor1) super.startElement(uri, localName, qName, atts)
                     skipDescendant = visitor1
                 } else if (!skipDescendant) {

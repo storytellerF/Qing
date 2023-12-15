@@ -128,7 +128,7 @@ class NavigationDetector(module: File) : Detector(module) {
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
         var fragmentFileSum = 0L
-        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "fragment", { attrs, u ->
+        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "fragment", { attrs, u, searcher, parser ->
             val ids = u.map {
                 it.split("-").first()
             }
@@ -136,13 +136,21 @@ class NavigationDetector(module: File) : Detector(module) {
                 it.substring(it.lastIndexOf("/") + 1)
             }
             if (ids.contains(value)) {
-                val name = attrs?.getValue("android:name")?.replace(".", "/")
-                val fragmentFile = File(module, "src/main/java/${name}.kt")
-                fragmentFileSum += fragmentFile.length()
-                if (isDry)
-                    println("delete $fragmentFile")
-                else {
-                    fragmentFile.delete()
+                val fullName = attrs?.getValue("android:name")
+                if (fullName != null) {
+                    val name = fullName.substring(fullName.lastIndexOf("."))
+                    val deleteFragment = searcher.search(parser.parse(name), 1).scoreDocs.isEmpty()
+                    if (deleteFragment) {
+
+                        val path = fullName.replace(".", "/")
+                        val fragmentFile = File(module, "src/main/java/${path}.kt")
+                        fragmentFileSum += fragmentFile.length()
+                        if (isDry)
+                            println("delete $fragmentFile")
+                        else {
+                            fragmentFile.delete()
+                        }
+                    }
                 }
                 true
             } else {
@@ -167,7 +175,7 @@ class ColorDetector(module: File) : Detector(module) {
         }
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
-        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "color", { attributes, u ->
+        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "color", { attributes, u, searcher, parser ->
             val name = attributes?.getValue("name")
             u.contains(name)
         }) {
