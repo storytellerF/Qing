@@ -49,7 +49,13 @@ class RemoveUnused(private val indexPathObj: Path, private val project: File, pr
     override fun execute() {
         refreshIndexIfNeed(indexPathObj, project, module)
         (if (full == true) {
-            listOf(DrawableDetector(module), RawDetector(module), LayoutDetector(module), NavigationDetector(module))
+            listOf(
+                DrawableDetector(module),
+                RawDetector(module),
+                LayoutDetector(module),
+                NavigationDetector(module),
+                ColorDetector(module)
+            )
         } else {
             listOf(ReportDetector(module))
         }).forEach {

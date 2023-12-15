@@ -8,11 +8,20 @@ import org.xml.sax.InputSource
 import org.xml.sax.helpers.DefaultHandler
 import org.xml.sax.helpers.XMLFilterImpl
 import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.io.StringReader
+import java.io.StringWriter
 import java.nio.file.Path
+import javax.xml.XMLConstants
 import javax.xml.parsers.SAXParserFactory
+import javax.xml.transform.OutputKeys
+import javax.xml.transform.Source
+import javax.xml.transform.Transformer
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.sax.SAXSource
 import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.stream.StreamSource
 
 data class Count(val separate: Int, val total: Int, val space: Long)
 
@@ -75,7 +84,8 @@ fun deleteUnusedXmlField(
     indexPath: Path?,
     list: Resources,
     isDryRun: Boolean,
-    module: File,
+    tagName: String,
+    visitor: (Attributes?, List<ResourceName>) -> Boolean,
     buildTerm: (String) -> List<String>
 ): Count {
     var separateCount = 0
@@ -86,7 +96,7 @@ fun deleteUnusedXmlField(
             val parser = QueryParser("content", analyzer)
             DirectoryReader.open(fsDirectory).use { reader ->
                 val searcher = IndexSearcher(reader)
-                val neverUsedNavigation = list.filter { (name, group) ->
+                val unusedNavigation = list.filter { (name, group) ->
                     buildTerm(name).all {
                         try {
                             val docs = searcher.search(parser.parse(it), 1)
@@ -98,12 +108,12 @@ fun deleteUnusedXmlField(
                         }
                     }
                 }
-                count += neverUsedNavigation.size
-                println(neverUsedNavigation)
+                count += unusedNavigation.size
+                println(unusedNavigation)
                 /**
                  * 转换key-value 的位置
                  */
-                val flatMap = neverUsedNavigation.flatMap { entry ->
+                val pathKeyed = unusedNavigation.flatMap { entry ->
                     entry.value.map {
                         it to entry.key
                     }
@@ -114,81 +124,84 @@ fun deleteUnusedXmlField(
                         name
                     }
                 }
-                separateCount += flatMap.size
-                flatMap.forEach { (t, u) ->
-                    val ids = u.map {
-                        it.split("-").first()
-                    }
-                    val xmlFilterImpl =
-                        object : XMLFilterImpl(SAXParserFactory.newInstance().newSAXParser().xmlReader) {
-                            private var skip = false
-
-                            override fun startElement(
-                                uri: String?,
-                                localName: String?,
-                                qName: String,
-                                atts: Attributes
-                            ) {
-                                if (qName == "fragment") {
-                                    val value = atts.getValue("android:id")?.let {
-                                        it.substring(it.lastIndexOf("/") + 1)
-                                    }
-                                    if (ids.contains(value)) {
-                                        val name = atts.getValue("android:name").replace(".", "/")
-                                        val path = File(module, "src/main/java/${name}.kt")
-                                        space += path.length()
-                                        if (isDryRun)
-                                            println("delete $path")
-                                        else {
-                                            println(path)
-                                            path.delete()
-                                        }
-                                        skip = true
-                                    } else {
-                                        super.startElement(uri, localName, qName, atts)
-                                        skip = false
-                                    }
-                                } else {
-                                    if (!skip) {
-                                        super.startElement(uri, localName, qName, atts)
-                                    }
-                                }
-                            }
-
-                            override fun endElement(uri: String?, localName: String?, qName: String?) {
-                                if (!skip) {
-                                    super.endElement(uri, localName, qName)
-                                }
-                            }
-
-                            override fun characters(ch: CharArray?, start: Int, length: Int) {
-                                if (!skip) {
-                                    super.characters(ch, start, length)
-                                }
-                            }
-                        }
-                    val file = File(t)
-                    val dest = File("$t.dest")
-                    file.inputStream().use { input ->
-                        dest.outputStream().use { output ->
-                            val saxSource = SAXSource(xmlFilterImpl, InputSource(input))
-                            val streamResult = if (isDryRun) StreamResult(System.out) else StreamResult(output)
-                            TransformerFactory.newInstance().newTransformer().transform(saxSource, streamResult)
-                        }
-
-                    }
-                    dest.inputStream().use { input ->
-                        file.outputStream().use { output ->
-                            output.buffered().write(input.readBytes())
-                        }
-                    }
-                    dest.delete()
-                }
+                separateCount += pathKeyed.size
+                val saxParserFactory = SAXParserFactory.newInstance()
+                space += pathKeyed.map { (path, u) ->
+                    filterUnusedField(saxParserFactory, tagName, visitor, u, path, isDryRun)
+                }.sum()
             }
         }
 
     }
     return Count(separateCount, count, space)
+}
+
+private fun filterUnusedField(
+    saxParserFactory: SAXParserFactory,
+    tagName: String,
+    visitor: (Attributes?, List<ResourceName>) -> Boolean,
+    u: List<ResourceName>,
+    path: ResourcePath,
+    isDryRun: Boolean
+): Long {
+    val xmlFilterImpl =
+        object : XMLFilterImpl(saxParserFactory.newSAXParser().xmlReader) {
+            private var skipDescendant = false
+
+            override fun startElement(
+                uri: String?,
+                localName: String?,
+                qName: String,
+                atts: Attributes
+            ) {
+                if (qName == tagName) {
+                    val visitor1 = visitor(atts, u)
+                    if (!visitor1) super.startElement(uri, localName, qName, atts)
+                    skipDescendant = visitor1
+                } else if (!skipDescendant) {
+                    super.startElement(uri, localName, qName, atts)
+                }
+            }
+
+            override fun endElement(uri: String?, localName: String?, qName: String?) {
+                if (!skipDescendant) {
+                    super.endElement(uri, localName, qName)
+                }
+            }
+
+            override fun characters(ch: CharArray?, start: Int, length: Int) {
+                if (!skipDescendant) {
+                    super.characters(ch, start, length)
+                }
+            }
+        }
+    val file = File(path)
+    val transformer = TransformerFactory.newInstance().apply {
+        setAttribute("indent-number", 4)
+    }.newTransformer().apply {
+        setOutputProperty(OutputKeys.INDENT, "yes")
+    }
+
+
+    val dest = File("$path.dest")
+    file.inputStream().use { input ->
+        dest.outputStream().use { output ->
+            val saxSource = SAXSource(xmlFilterImpl, InputSource(input))
+            val streamResult = StreamResult(output)
+            transformer.transform(saxSource, streamResult)
+        }
+    }
+
+    val space = file.length() - dest.length()
+    if (!isDryRun) {
+        dest.inputStream().use { input ->
+            file.outputStream().use { output ->
+                output.buffered().write(input.readBytes())
+            }
+        }
+    }
+    dest.delete()
+    return space
 }
 
 

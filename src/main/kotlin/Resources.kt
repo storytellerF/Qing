@@ -112,6 +112,72 @@ class ReportDetector(module: File) : Detector(module) {
 
 }
 
+class NavigationDetector(module: File) : Detector(module) {
+    override fun detectInternal() = xmlResources(module, { it.startsWith("navigation") }, {
+        it.extension == "xml"
+    }) { qName, attributes ->
+        if (qName != "fragment") null
+        else {
+            val id = attributes?.getValue("android:id")?.let {
+                it.substring(it.lastIndexOf("/") + 1)
+            }
+            val name = attributes?.getValue("android:name")
+            if (id != null || name != null) "$id-$name" else null
+        }
+    }
+
+    override fun runInternal(indexObj: Path, isDry: Boolean) {
+        var fragmentFileSum = 0L
+        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "fragment", { attrs, u ->
+            val ids = u.map {
+                it.split("-").first()
+            }
+            val value = attrs?.getValue("android:id")?.let {
+                it.substring(it.lastIndexOf("/") + 1)
+            }
+            if (ids.contains(value)) {
+                val name = attrs?.getValue("android:name")?.replace(".", "/")
+                val fragmentFile = File(module, "src/main/java/${name}.kt")
+                fragmentFileSum += fragmentFile.length()
+                if (isDry)
+                    println("delete $fragmentFile")
+                else {
+                    fragmentFile.delete()
+                }
+                true
+            } else {
+                false
+            }
+        }) {
+            val (id, fullName) = it.split("-")
+            val name = fullName.substring(fullName.lastIndexOf(".") + 1)
+            listOf(id, "${name}Args")
+        }
+        println("navigation total ${data.size} delete $count $c space ${(space + fragmentFileSum).toFloat() / 1048576} MB")
+    }
+
+}
+
+class ColorDetector(module: File) : Detector(module) {
+    override fun detectInternal() =
+        xmlResources(module, { it.startsWith("color") || it.startsWith("values") }, {
+            it.absolutePath.split("/").contains("color") || it.name == "colors.xml"
+        }) { qName, attributes ->
+            if (qName == "color") attributes?.getValue("name") else null
+        }
+
+    override fun runInternal(indexObj: Path, isDry: Boolean) {
+        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "color", { attributes, u ->
+            val name = attributes?.getValue("name")
+            u.contains(name)
+        }) {
+            listOf(it)
+        }
+        println("color total ${data.size} delete $count $c space ${space.toFloat() / 1048576} MB")
+    }
+
+}
+
 /**
  * 解析指定目录指定文件类型的所有文件。
  * @return 返回的数据包含文件名和对应的文件
@@ -147,7 +213,8 @@ fun resources(
 fun xmlResources(
     module: File,
     pathDetect: (String) -> Boolean,
-    fileDetect: (File) -> Boolean
+    fileDetect: (File) -> Boolean,
+    getId: (String?, Attributes?) -> String?,
 ): Resources {
     val newSAXParser = SAXParserFactory.newInstance().newSAXParser()
     val resPath = File(module, "src/main/res/")
@@ -164,14 +231,8 @@ fun xmlResources(
         val list = mutableListOf<ResourceName>()
         newSAXParser.parse(file, object : DefaultHandler() {
             override fun startElement(uri: String?, localName: String?, qName: String?, attributes: Attributes?) {
-                if (qName == "fragment") {
-                    val id = attributes?.getValue("android:id")?.let {
-                        it.substring(it.lastIndexOf("/") + 1)
-                    }
-                    val name = attributes?.getValue("android:name")
-                    if (id != null || name != null) {
-                        list.add("$id-$name")
-                    }
+                getId(qName, attributes)?.let {
+                    list.add(it)
                 }
             }
         })
