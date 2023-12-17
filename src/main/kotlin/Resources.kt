@@ -166,23 +166,37 @@ class NavigationDetector(module: File) : Detector(module) {
 
 }
 
-class ColorDetector(module: File) : Detector(module) {
+abstract class SimpleXmlDetector(module: File): Detector(module) {
+
+    abstract val tagName: String
     override fun detectInternal() =
-        xmlResources(module, { it.startsWith("color") || it.startsWith("values") }, {
-            it.absolutePath.split("/").contains("color") || it.name == "colors.xml"
+        xmlResources(module, { it.startsWith(tagName) || it.startsWith("values") }, {
+            it.absolutePath.split("/").contains(tagName) || it.name == "${tagName}s.xml"
         }) { qName, attributes ->
-            if (qName == "color") attributes?.getValue("name") else null
+            if (qName == tagName) attributes?.getValue("name") else null
         }
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
-        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "color", { attributes, u, searcher, parser ->
+        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, tagName, { attributes, u, _, _ ->
             val name = attributes?.getValue("name")
             u.contains(name)
         }) {
             listOf(it)
         }
-        println("color total ${data.size} delete $count $c space ${space.toFloat() / 1048576} MB")
+        println("$tagName total ${data.size} delete $count $c space ${space.toFloat() / 1048576} MB")
     }
+
+}
+
+class ColorDetector(module: File) : SimpleXmlDetector(module) {
+    override val tagName: String
+        get() = "color"
+
+}
+
+class DimenDetector(module: File) : SimpleXmlDetector(module) {
+    override val tagName: String
+        get() = "dimen"
 
 }
 

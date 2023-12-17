@@ -14,6 +14,7 @@ import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.sax.SAXSource
 import javax.xml.transform.stream.StreamResult
+import javax.xml.transform.stream.StreamSource
 
 data class Count(val separate: Int, val total: Int, val space: Long)
 
@@ -72,6 +73,9 @@ fun deleteUnused(
     return Count(separateCount, count, space)
 }
 
+/**
+ * @param visitor 返回是否需要排除
+ */
 fun deleteUnusedXmlField(
     indexPath: Path?,
     list: Resources,
@@ -99,7 +103,7 @@ fun deleteUnusedXmlField(
                     }
                 }
                 count += unusedNavigation.size
-                if (isDryRun) {
+                if (isDryRun && unusedNavigation.isNotEmpty()) {
                     println(unusedNavigation)
                 }
                 /**
@@ -140,7 +144,7 @@ private fun filterUnusedField(
 ): Long {
     val xmlFilterImpl =
         object : XMLFilterImpl(saxParserFactory.newSAXParser().xmlReader) {
-            private var skipDescendant = false
+            private var skipDescendant: String? = null
 
             override fun startElement(
                 uri: String?,
@@ -148,33 +152,35 @@ private fun filterUnusedField(
                 qName: String,
                 atts: Attributes
             ) {
-                if (qName == tagName) {
-                    val visitor1 = visitor(atts, u, indexSearcher, queryParser)
-                    if (!visitor1) super.startElement(uri, localName, qName, atts)
-                    skipDescendant = visitor1
-                } else if (!skipDescendant) {
-                    super.startElement(uri, localName, qName, atts)
+                if (skipDescendant == null) {
+                    if (qName == tagName) {
+                        val exclude = visitor(atts, u, indexSearcher, queryParser)
+                        if (!exclude) super.startElement(uri, localName, qName, atts)
+                        skipDescendant = if (exclude) qName else null
+                    } else {
+                        super.startElement(uri, localName, qName, atts)
+                    }
                 }
             }
 
             override fun endElement(uri: String?, localName: String?, qName: String?) {
-                if (!skipDescendant) {
+                if (skipDescendant == null) {
                     super.endElement(uri, localName, qName)
+                } else if (qName == skipDescendant) {
+                    skipDescendant = null
                 }
             }
 
             override fun characters(ch: CharArray?, start: Int, length: Int) {
-                if (!skipDescendant) {
+                if (skipDescendant == null) {
                     super.characters(ch, start, length)
                 }
             }
         }
     val file = File(path)
-    val transformer = TransformerFactory.newInstance().apply {
-        setAttribute("indent-number", 4)
-    }.newTransformer().apply {
-        setOutputProperty(OutputKeys.INDENT, "yes")
-    }
+    val stylesheetFile = File("src/main/resources/stylesheet")
+    println(stylesheetFile.absolutePath)
+    val transformer = TransformerFactory.newInstance().newTransformer(StreamSource(stylesheetFile))
 
 
     val dest = File("$path.dest")
@@ -193,8 +199,8 @@ private fun filterUnusedField(
                 output.buffered().write(input.readBytes())
             }
         }
+        dest.delete()
     }
-    dest.delete()
     return space
 }
 

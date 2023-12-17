@@ -54,7 +54,8 @@ class RemoveUnused(private val indexPathObj: Path, private val project: File, pr
                 RawDetector(module),
                 LayoutDetector(module),
                 NavigationDetector(module),
-                ColorDetector(module)
+                ColorDetector(module),
+                DimenDetector(module)
             )
         } else {
             listOf(ReportDetector(module))
