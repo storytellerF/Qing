@@ -128,7 +128,7 @@ class NavigationDetector(module: File) : Detector(module) {
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
         var fragmentFileSum = 0L
-        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, "fragment", { attrs, u, searcher, parser ->
+        val (count, c, space) = deleteUnusedXmlField(indexObj, module, data, isDry, "fragment", { attrs, u, searcher, parser ->
             val ids = u.map {
                 it.split("-").first()
             }
@@ -178,7 +178,7 @@ abstract class SimpleXmlDetector(module: File): Detector(module) {
         }
 
     override fun runInternal(indexObj: Path, isDry: Boolean) {
-        val (count, c, space) = deleteUnusedXmlField(indexObj, data, isDry, tagName, { attributes, u, _, _ ->
+        val (count, c, space) = deleteUnusedXmlField(indexObj, module, data, isDry, tagName, { attributes, u, _, _ ->
             val name = attributes?.getValue("name")
             u.contains(name)
         }) {

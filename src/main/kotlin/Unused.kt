@@ -77,6 +77,7 @@ fun deleteUnused(
  */
 fun deleteUnusedXmlField(
     indexPath: Path?,
+    module: File,
     list: Resources,
     isDryRun: Boolean,
     tagName: String,
@@ -95,12 +96,15 @@ fun deleteUnusedXmlField(
                     buildTerm(name).all {
                         try {
                             val scoreDocs = searcher.search(parser.parse(it), 100).scoreDocs
-                            if (it == "navigation_discover" || it == "DiscoverFragment") {
-                                scoreDocs.forEach {
-                                    println(searcher.doc(it.doc))
+                            if (it.endsWith("Args")) {
+                                val fullName = name.split("-").last()
+                                val path = fullName.replace(".", "/")
+                                val fragmentFile = File(module, "src/main/java/${path}.kt")
+                                scoreDocs.none {
+                                    searcher.doc(it.doc).get("path") != fragmentFile.absolutePath
                                 }
-                            }
-                            scoreDocs.isEmpty()
+                            } else
+                                scoreDocs.isEmpty()
                         } catch (e: Exception) {
                             System.err.println(Exception("exception in search $it", e))
                             false
