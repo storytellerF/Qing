@@ -95,7 +95,7 @@ fun refreshFolders(
 ): List<Pair<String, FileChangeMode>> {
     val srcFolders = if (oldSha.isNotEmpty()) {
         val predicate: (String) -> Boolean = {
-            it.endsWith(".kt") || it.endsWith(".xml")
+            (it.endsWith(".kt") || it.endsWith(".xml")) && !it.contains("res/navigation")
         }
         diffFiles(oldSha, currentSha, project, "M").filter(predicate).map {
             File(project, it).absolutePath to FileChangeMode.CHANGE
@@ -129,13 +129,16 @@ fun refreshFolders(
         while (stack.isNotEmpty()) {
             val pathname = stack.pollFirst()
             File(pathname).list()?.forEach {
-                val element = File(pathname, it).absolutePath
+                val file = File(pathname, it)
+                val element = file.absolutePath
                 when {
-                    File(pathname, it).isDirectory -> stack.add(element)
+                    file.isDirectory -> {
+                        if (it != "navigation" || !pathname.endsWith("res")){
+                            stack.add(element)
+                        }
+                    }
 
-                    File(pathname, it).name.endsWith(".kt") || File(pathname, it).let {
-                        it.name.endsWith(".xml") && !it.absolutePath.contains("navigation")
-                    } ->
+                    it.endsWith(".kt") || it.endsWith(".xml") ->
                         srcFolders.add(element to FileChangeMode.NEW)
                 }
             }

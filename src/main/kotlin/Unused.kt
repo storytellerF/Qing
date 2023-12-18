@@ -10,7 +10,6 @@ import org.xml.sax.helpers.XMLFilterImpl
 import java.io.File
 import java.nio.file.Path
 import javax.xml.parsers.SAXParserFactory
-import javax.xml.transform.OutputKeys
 import javax.xml.transform.TransformerFactory
 import javax.xml.transform.sax.SAXSource
 import javax.xml.transform.stream.StreamResult
@@ -95,7 +94,13 @@ fun deleteUnusedXmlField(
                 val unusedNavigation = list.filter { (name, group) ->
                     buildTerm(name).all {
                         try {
-                            searcher.search(parser.parse(it), 1).scoreDocs.isEmpty()
+                            val scoreDocs = searcher.search(parser.parse(it), 100).scoreDocs
+                            if (it == "navigation_discover" || it == "DiscoverFragment") {
+                                scoreDocs.forEach {
+                                    println(searcher.doc(it.doc))
+                                }
+                            }
+                            scoreDocs.isEmpty()
                         } catch (e: Exception) {
                             System.err.println(Exception("exception in search $it", e))
                             false
@@ -104,7 +109,10 @@ fun deleteUnusedXmlField(
                 }
                 count += unusedNavigation.size
                 if (isDryRun && unusedNavigation.isNotEmpty()) {
-                    println(unusedNavigation)
+                    unusedNavigation.forEach { t, u ->
+                        println(t)
+                        println(u)
+                    }
                 }
                 /**
                  * 转换key-value 的位置
@@ -177,12 +185,10 @@ private fun filterUnusedField(
                 }
             }
         }
-    val file = File(path)
     val stylesheetFile = File("src/main/resources/stylesheet")
-    println(stylesheetFile.absolutePath)
     val transformer = TransformerFactory.newInstance().newTransformer(StreamSource(stylesheetFile))
 
-
+    val file = File(path)
     val dest = File("$path.dest")
     file.inputStream().use { input ->
         dest.outputStream().use { output ->
@@ -196,7 +202,10 @@ private fun filterUnusedField(
     if (!isDryRun) {
         dest.inputStream().use { input ->
             file.outputStream().use { output ->
-                output.buffered().write(input.readBytes())
+                output.buffered().let {
+                    it.write(input.readBytes())
+                    it.flush()
+                }
             }
         }
         dest.delete()

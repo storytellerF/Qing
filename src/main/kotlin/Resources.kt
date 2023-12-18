@@ -139,11 +139,12 @@ class NavigationDetector(module: File) : Detector(module) {
                 val fullName = attrs?.getValue("android:name")
                 if (fullName != null) {
                     val name = fullName.substring(fullName.lastIndexOf("."))
-                    val deleteFragment = searcher.search(parser.parse(name), 1).scoreDocs.isEmpty()
+                    val path = fullName.replace(".", "/")
+                    val fragmentFile = File(module, "src/main/java/${path}.kt")
+                    val deleteFragment = searcher.search(parser.parse(name), 1000).scoreDocs.all {
+                        searcher.doc(it.doc).get("path") == fragmentFile.absolutePath
+                    }
                     if (deleteFragment) {
-
-                        val path = fullName.replace(".", "/")
-                        val fragmentFile = File(module, "src/main/java/${path}.kt")
                         fragmentFileSum += fragmentFile.length()
                         if (isDry)
                             println("delete $fragmentFile")

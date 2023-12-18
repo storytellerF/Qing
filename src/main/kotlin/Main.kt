@@ -50,10 +50,10 @@ class RemoveUnused(private val indexPathObj: Path, private val project: File, pr
         refreshIndexIfNeed(indexPathObj, project, module)
         (if (full == true) {
             listOf(
+                NavigationDetector(module),
+                LayoutDetector(module),
                 DrawableDetector(module),
                 RawDetector(module),
-                LayoutDetector(module),
-                NavigationDetector(module),
                 ColorDetector(module),
                 DimenDetector(module)
             )
